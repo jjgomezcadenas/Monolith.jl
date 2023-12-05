@@ -1,5 +1,6 @@
 module Monolith
 
-# Write your package code here.
-
+using Revise
+include("image_generator.jl")
+include("load_images.jl")
 end
