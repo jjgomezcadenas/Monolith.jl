@@ -37,676 +37,120 @@ end
 # ╔═╡ fc8696df-9ec7-444c-8f85-d06e3c2089fd
 PlutoUI.TableOfContents(title="CNN", indent=true)
 
-# ╔═╡ 04efc24e-fc05-43e5-aee5-e55ef947f3a9
+# ╔═╡ f9fc6d3a-f69a-4e2b-8135-b5339145d567
 md"""
-# A Simple ConvNet
+## MNet Model 
 """
 
-# ╔═╡ 2b1be43b-4265-43c7-9a34-179562e8093f
+# ╔═╡ f358d94a-1530-4544-bbb8-6c3a3e3ff0fd
 md"""
-## Convolutional NN
+## Load data set
 """
 
-# ╔═╡ 4f5cb10d-435b-429b-86f5-fe0fce156666
-md"""Convolutional Neural Networks take advantage of the fact that the input consists of images and they constrain the architecture in a more sensible way. In particular, unlike a regular Neural Network, the layers of a ConvNet have neurons arranged in 3 dimensions: width, height, depth. (Note that the word depth here refers to the third dimension of an activation volume, not to the depth of a full Neural Network, which can refer to the total number of layers in a network.) For example, the input images in CIFAR-10 are an input volume of activations, and the volume has dimensions 32x32x3 (width, height, depth respectively). As we will soon see, the neurons in a layer will only be connected to a small region of the layer before it, instead of all of the neurons in a fully-connected manner. Moreover, the final output layer would for CIFAR-10 have dimensions 1x1x10, because by the end of the ConvNet architecture we will reduce the full image into a single vector of class scores, arranged along the depth dimension. Here is a visualization:"""
-
-
-# ╔═╡ c0fba35e-3bb6-479d-a49d-3b8ed8645334
-load("cnn.jpeg")
-
-# ╔═╡ 6cb915d9-0777-49c9-a2ad-22d3ce759c21
-md"""
-A ConvNet arranges its neurons in three dimensions (width, height, depth), as visualized in one of the layers. Every layer of a ConvNet transforms the 3D input volume to a 3D output volume of neuron activations. In this example, the red input layer holds the image, so its width and height would be the dimensions of the image, and the depth would be 3 (Red, Green, Blue channels).
-"""
-
-# ╔═╡ 517791f5-9ece-4d0e-9f31-fb3f904292e0
-md"""
-### Layers used to build ConvNets
-
-As we described above, a simple ConvNet is a sequence of layers, and every layer of a ConvNet transforms one volume of activations to another through a differentiable function. 
-
-We use three main types of layers to build ConvNet architectures: Convolutional Layer, Pooling Layer, and Fully-Connected Layer (exactly as seen in regular Neural Networks). We will stack these layers to form a full ConvNet architecture.
-
-Example Architecture: Overview. A simple ConvNet for CIFAR-10 classification could have the architecture [INPUT - CONV - RELU - POOL - FC]. In more detail:
-
-- INPUT [32x32x3] will hold the raw pixel values of the image, in this case an image of width 32, height 32, and with three color channels R,G,B.
-
-- CONV layer will compute the output of neurons that are connected to local regions in the input, each computing a dot product between their weights and a small region they are connected to in the input volume. This may result in volume such as [32x32x12] if we decided to use 12 filters.
-
-- RELU layer will apply an elementwise activation function, such as the max(0,x)
- thresholding at zero. This leaves the size of the volume unchanged ([32x32x12]).
-
-- POOL layer will perform a downsampling operation along the spatial dimensions (width, height), resulting in volume such as [16x16x12].
-
-- FC (i.e. fully-connected) layer will compute the class scores, resulting in volume of size [1x1x10], where each of the 10 numbers correspond to a class score, such as among the 10 categories of CIFAR-10. As with ordinary Neural Networks and as the name implies, each neuron in this layer will be connected to all the numbers in the previous volume.
-
-In this way, ConvNets transform the original image layer by layer from the original pixel values to the final class scores. Note that some layers contain parameters and other don’t. In particular, the CONV/FC layers perform transformations that are a function of not only the activations in the input volume, but also of the parameters (the weights and biases of the neurons). On the other hand, the RELU/POOL layers will implement a fixed function. The parameters in the CONV/FC layers will be trained with gradient descent so that the class scores that the ConvNet computes are consistent with the labels in the training set for each image.
-"""
-
-# ╔═╡ 94986e46-ab91-4dce-a2d7-8cadd3c6f1c6
-md"""
-### Convolutional Layer
-
-The Conv layer is the core building block of a Convolutional Network.
-
-The CONV layer’s parameters consist of a set of learnable filters. Every filter is small spatially (along width and height), but extends through the full depth of the input volume. For example, a typical filter on a first layer of a ConvNet might have size 5x5x3 (i.e. 5 pixels width and height, and 3 because images have depth 3, the color channels). During the forward pass, we slide (more precisely, convolve) each filter across the width and height of the input volume and compute dot products between the entries of the filter and the input at any position. As we slide the filter over the width and height of the input volume we will produce a 2-dimensional activation map that gives the responses of that filter at every spatial position. Intuitively, the network will learn filters that activate when they see some type of visual feature such as an edge of some orientation or a blotch of some color on the first layer, or eventually entire honeycomb or wheel-like patterns on higher layers of the network. Now, we will have an entire set of filters in each CONV layer (e.g. 12 filters), and each of them will produce a separate 2-dimensional activation map. We will stack these activation maps along the depth dimension and produce the output volume.
-
-
-"""
-
-# ╔═╡ a682566d-1095-4e06-8d28-871ede647ad2
-load("depthcol.jpeg")
-
-# ╔═╡ b9a318cc-de07-4307-9ac9-567936fb8e6e
-md"""
-An example input volume in red (e.g. a 32x32x3 CIFAR-10 image), and an example volume of neurons in the first Convolutional layer. Each neuron in the convolutional layer is connected only to a local region in the input volume spatially, but to the full depth (i.e. all color channels). Note, there are multiple neurons (5 in this example) along the depth, all looking at the same region in the input: the lines that connect this column of 5 neurons do not represent the weights (i.e. these 5 neurons do not share the same weights, but they are associated with 5 different filters), they just indicate that these neurons are connected to or looking at the same receptive field or region of the input volume, i.e. they share the same receptive field but not the same weights.
-
-### Local Connectivity
-
-When dealing with high-dimensional inputs such as images, as we saw above it is impractical to connect neurons to all neurons in the previous volume. Instead, we will connect each neuron to only a local region of the input volume. The spatial extent of this connectivity is a hyperparameter called the receptive field of the neuron (equivalently this is the filter size). The extent of the connectivity along the depth axis is always equal to the depth of the input volume. It is important to emphasize again this asymmetry in how we treat the spatial dimensions (width and height) and the depth dimension: The connections are local in 2D space (along width and height), but always full along the entire depth of the input volume.
-
-- Example 1. For example, suppose that the input volume has size [32x32x3], (e.g. an RGB CIFAR-10 image). If the receptive field (or the filter size) is 5x5, then each neuron in the Conv Layer will have weights to a [5x5x3] region in the input volume, for a total of 5*5*3 = 75 weights (and +1 bias parameter). Notice that the extent of the connectivity along the depth axis must be 3, since this is the depth of the input volume.
-
-- Example 2. Suppose an input volume had size [16x16x20]. Then using an example receptive field size of 3x3, every neuron in the Conv Layer would now have a total of 3*3*20 = 180 connections to the input volume. Notice that, again, the connectivity is local in 2D space (e.g. 3x3), but full along the input depth (20).
-"""
-
-# ╔═╡ c513359b-97ab-4c81-ae59-9e232d8dcd2e
-md"""
-### Spatial arrangement. 
-
-We have explained the connectivity of each neuron in the Conv Layer to the input volume, but we haven’t yet discussed how many neurons there are in the output volume or how they are arranged. Three hyperparameters control the size of the output volume: the depth, stride and zero-padding. We discuss these next:
-
-- First, the depth of the output volume is a hyperparameter: **it corresponds to the number of filters we would like to use, each learning to look for something different in the input**. For example, if the first Convolutional Layer takes as input the raw image, then different neurons along the depth dimension may activate in presence of various oriented edges, or blobs of color. We will refer to a set of neurons that are all looking at the same region of the input as a depth column (some people also prefer the term fibre).
-
-- Second, we must specify the stride with which we slide the filter. When the stride is 1 then we move the filters one pixel at a time. When the stride is 2 (or uncommonly 3 or more, though this is rare in practice) then the filters jump 2 pixels at a time as we slide them around. This will produce smaller output volumes spatially.
-
-- As we will soon see, sometimes it will be convenient to pad the input volume with zeros around the border. The size of this zero-padding is a hyperparameter. The nice feature of zero padding is that it will allow us to control the spatial size of the output volumes (most commonly as we’ll see soon we will use it to exactly preserve the spatial size of the input volume so the input and output width and height are the same).
-
-- We can compute the spatial size of the output volume as a function of the input volume size (W), the receptive field size of the Conv Layer neurons (F), the stride with which they are applied (S), and the amount of zero padding used (P) on the border. The formula for calculating how many neurons “fit” is given by (W−F+2P)/S+1. For example for a 7x7 input and a 3x3 filter with stride 1 and pad 0 we would get a 5x5 output. """
-
-# ╔═╡ 81d8337a-3f82-4df0-b2d6-2e78c2b10026
-md"""
-### Summary. To summarize, the Conv Layer:
-
-- Accepts a volume of size W1×H1×D1
-Requires four hyperparameters:
-    - Number of filters K,
-    - Their spatial extent F,
-    - The stride S,
-    - The amount of zero padding P.
-
-- Produces a volume of size W2×H2×D2, where:
-    - W2=(W1−F+2P)/S+1
-    - H2=(H1−F+2P)/S+1
-    - D2=K
-
-- With parameter sharing, it introduces F⋅F⋅D1 weights per filter, for a total of (F⋅F⋅D1)⋅K weights and K biases. 
-
-- In the output volume, the d-th depth slice (of size W2×H2) is the result of performing a valid convolution of the d-th filter over the input volume with a stride of S, and then offset by d-th bias.
-
-"""
-
-# ╔═╡ 7be6c2b0-5411-4ca5-9a69-6812b7e42f49
-md"""
-## An example of convolution
-- Inmput matrices -->[5,5,3]
-- Filters -->[3,3,3]
-- Notice: different filters for each "third dimension" (e.g, color)
-- Padding of one and bias of one
-- Stride of 2
-"""
-
-# ╔═╡ b5dbb8f4-042e-4e2c-a046-12e8b564539d
-md"""
-function ```xconv``` takes the images and filters, plus the hyperparameters, bs (bias), P (pad) and S (stride).
-- It pads the images with zeros (column of zero left and right, rows of zeros up and dow)
-- It slides the filters over the images, in steps of Stride.
-- The convolution is performed by elconv!. It is simply the product element by element of the filter and the corresponding chunk of the image, followed by sum.
-"""
-
-# ╔═╡ 08b1646a-c1e8-476c-9a9e-31185b46b9b9
-function xconv(img, flt, bs=1, P=1, S=2)
-	
-	function elconv!(imgx, fltx, x0,x1, y0, y1)
-		ss = [sum(imgx[x0:x1, y0:y1, i] .* fltx[:,:,i]) for i in 1:3]
-		sum(ss) + bs
-	end
-
-	sz = size(img[:,:,1]) .+2 # size of the padded matrix
-	dz = size(img)[3]         # depth (number of stacked matrices)
-	inmp = zeros(sz...,dz)
-	for i in 1:dz
-		inmp[:,:,i] = padarray(img[:,:,i], Fill(0,(P,P),(P,P))) #padding
-	end
-	F = size(flt)[1]
-	W = size(img)[1] 
-	W2 =Int((W - F + 2*P)/S + 1)
-	K = 1
-	nW = F*F*dz*K
-	@info "size of Filter (F) = $F"
-	@info "size of input matrix (without pads) (W) = $W"
-	@info "P =$P, S=$S"
-	@info "size of output matrix  (W2) = $W2"
-	@info "Convolution depth K =$K"
-	@info "number of weights =$(nW)"
-	@info "number of biases =$(K)"
-	@info "number of parameters =$(K+nW)"
-
-	cvx = zeros(W2, W2)
-	for (i, wx) in enumerate(1:S:W)
-		x0 = wx
-		x1 = wx + F - 1
-		for (j, wy) in enumerate(1:S:W)
-			y0 = wy
-			y1 = wy + F -1
-			#@debug "x0 = $x0, x1 = $x1, y0 = $y0, y1 = $y1"
-			cvx[i,j] = elconv!(inmp, flt, x0, x1,y0,y1)
-		end
-	end
-	cvx
-	
-end
-
-# ╔═╡ 844f41da-ba98-4bbf-bd87-9fba538ed088
-md"""
-- In Flux we can define a Conv layer doing precisely so. 
-- Size of the filter is (3,3)
-- input  dimensions (3) and output dimension (1)
-- activation function (relu, identity...)
-- strid, pad and bias.
-"""
-
-# ╔═╡ 1ed7b768-d432-4219-8ff8-f269655a41cb
-layr = Conv((3,3), 3 => 1, identity; stride = 2, pad = 1,bias = [1.0])
-
-# ╔═╡ 003c6e76-cf12-4895-8e90-701c277883af
-md"""
-- How can one get the convolution? 
-"""
-
-# ╔═╡ 0e87fba4-799a-4c8d-9d00-67924ff5f437
-md"""
-## MINST tutorial
-"""
-
-# ╔═╡ e8a48260-74a5-4eab-a02d-8e1554abec20
-md"""
-### Setup
-
-- We set default values for learning rate, batch size, number of epochs, and path for saving the file mnist_conv.bson:
-
-"""
-
-# ╔═╡ 2cc5bf52-3612-49c4-8e32-f9ebbb5d3867
-Base.@kwdef mutable struct TrainArgs
-   lr::Float64 = 3e-3
-   epochs::Int = 20
-   batch_size = 128
-   savepath::String = "./"
-end
-
-# ╔═╡ 1d5c2ea2-a4d7-4668-9e0e-9fc0a8862079
-md"""
-
-## Data
-
-- To train our model, we need to bundle images together with their labels and group them into mini-batches (makes the training process faster). We define the function ```make_minibatch``` that takes as inputs the images (X) and their labels (Y) as well as the indices for the mini-batches (idx).
-
-- Image data should be stored in WHCN order (width, height, channels, batch). In other words, a 100×100 RGB image would be a 100×100×3×1 array, and a batch of 50 would be a 100×100×3×50 array. In our example we have gray images of 28 x 28 size, so we will store the images in vectors of 28 x 28 x 1 x lb (where lb is the length of the batch)
-
-"""
-
-# ╔═╡ e654a457-4fde-4e8a-9a10-72181afe5d88
-function make_minibatch(X, Y, idxs)
-   X_batch = Array{Float32}(undef, size(X)[1:end-1]..., 1, length(idxs))
-   for i in 1:length(idxs)
-       X_batch[:, :, :, i] = Float32.(X[:,:,idxs[i]])
-   end
-   Y_batch = onehotbatch(Y[idxs], 0:9)
-   return (X_batch, Y_batch)
-end
-
-# ╔═╡ 4ac3a1b4-816e-47d0-a7a0-9e02453b1f53
-md"""
-- ```make_minibatch``` takes the following steps:
-
-- Assuming that we want to divide the data (e.g, 60,000 images) in 128 mini-batches
-
-- Creates the X_batch array of size 28x28x1x128 to store the mini-batches (the extra dimension is to take into account the colour channel, in this case 1 because Gray).
-
-- Stores the mini-batches in X_batch.
-- One hot encodes the labels of the images.
-- Stores the labels in Y_batch.
-
-"""
-
-# ╔═╡ 3c179f7e-d256-4923-9b28-b708952b5cb7
-md"""
-#### Use of partition 
-
-- Partition the data set according to batch size, creating the indexes of the batches. We use the function partition
-```partition(collection, n)```
-
-- For example:
-"""
-
-# ╔═╡ 8813602c-9605-48c0-b44d-384d9a2c711c
-collect(partition([1,2,3,4,5], 2))
-
-# ╔═╡ d84854ef-7c3c-4ca2-8a79-9f8eb4411fcc
-args = TrainArgs()
-
-# ╔═╡ 599a863c-0fd8-4677-af0e-6a49e8dd5636
-function get_processed_data(args)
-	# Load labels and images
-	dataset = MNIST(:train)
-	train_imgs, train_labels = dataset[:]
-	mb_idxs = partition(1:length(train_labels), args.batch_size)
-	train_set = [make_minibatch(train_imgs, train_labels, i) for i in mb_idxs]
-  
-	# Prepare test set as one giant minibatch:
-	dataset = MNIST(:train)
-	test_imgs, test_labels = dataset[:]
-	test_set = make_minibatch(test_imgs, test_labels, 1:length(test_labels))
- 
-   return train_set, test_set
- 
-end
-
-# ╔═╡ 62e3fff7-ffde-4a9a-aefc-d18152390932
-md"""
-## Model
-
-- Now, we define the build_model function that creates a ConvNet model which is composed of three convolution layers (feature detection) and one classification layer. 
-
-- The input layer size is 28x28. The images are grayscale, which means there is only one channel (compared to 3 for RGB) in every data point. 
-Combined together, the convolutional layer structure would look like:
-
-```Conv(kernel, input_channels => output_channels, ...).``` 
-
-- Each convolution layer reduces the size of the image by applying the Rectified Linear unit (ReLU) and MaxPool operations. 
-
-- On the other hand, the classification layer outputs a vector of 10 dimensions (a dense layer), that is, the number of classes that the model will be able to predict.
-"""
-
-# ╔═╡ 947aff60-5ca6-4d73-81b3-61b0582c365b
-md"""
-- The size of the resulting CNN cam be computed from the number of MaxPools (3 of them of 2 x 2, thus 2^3 = 8 in each direction) and the final transformation in size (1->16->32)
-"""
-
-# ╔═╡ c6482309-b228-4ad4-9db7-e4bc61ec0bfb
-cnn_output_size = Int.(floor.([28/8,28/8,32]))
-
-# ╔═╡ 5ed5814e-a414-4fff-bae7-e9541edcc4b6
-function build_model(args; imgsize = (28,28,1), nclasses = 10)
-   cnn_output_size = Int.(floor.([imgsize[1]/8,imgsize[2]/8,32])) 
- 
-   return Chain(
-   # First convolution, operating upon a 28x28 image
-   Conv((3, 3), imgsize[3]=>16, pad=(1,1), relu),
-   MaxPool((2,2)),
- 
-   # Second convolution, operating upon a 14x14 image
-   Conv((3, 3), 16=>32, pad=(1,1), relu),
-   MaxPool((2,2)),
- 
-   # Third convolution, operating upon a 7x7 image
-   Conv((3, 3), 32=>32, pad=(1,1), relu),
-   MaxPool((2,2)),
- 
-   # Reshape 3d array into a 2d one using `Flux.flatten`, at this point it should be (3, 3, 32, N)
-   Flux.flatten,
-   Dense(prod(cnn_output_size), 10))
-end
-
-# ╔═╡ 5de74434-b1cd-4715-897b-4026d06a9a63
-md"""
-
-## Training
-
-- Before training our model, we need to define a few functions that will be helpful for the process:
-
-- ```augment``` adds gaussian random noise to our image, to make it more robust:
-
-- ```anynan``` checks whether any element of the params is NaN or not:
-
-- ```accuracy``` computes the proportion of inputs x correctly classified by our ConvNet:
-"""
-
-# ╔═╡ 510cb338-1e0c-4fdd-bc37-581ba68430f9
+# ╔═╡ 492a84e6-e7bf-4a59-a791-e9c8a02819f5
 begin
-	augment(x) = x .+ 0.1f0*randn(eltype(x), size(x))
-	anynan(x) = any(y -> any(isnan, y), x)
-	accuracy(x, y, model) = mean(onecold(cpu(model(x))) .== onecold(cpu(y)))
+	rpath = "/Users/jjgomezcadenas/Data/monolith/testrun1"
+	ipath =joinpath(rpath,"imgs")
+	lpath =joinpath(rpath,"lbls")
 end
 
-# ╔═╡ cc5a65aa-2945-43c0-8b2b-b105335773ef
+# ╔═╡ c0da60f2-b14d-43af-8cb5-ddb60d7d942b
 md"""
+- Flux requires that image data is stored in WHCB order (width, height, channels, batch). In other words, a 100×100 RGB image would be a 100×100×3×1 array, and a batch of 50 would be a 100×100×3×50 array. This has N = 2 spatial dimensions, and needs a kernel size like (5,5), a 2-tuple of integers.
 
-- ```train``` calls the functions we defined above and trains our model. It stops when the model achieves 99% accuracy (early-exiting) or after performing 20 steps. More specifically, it performs the following steps:
-
-- Loads the MNIST dataset.
-- Builds our ConvNet model (as described above).
-- Loads the train and test data sets as well as our model onto a GPU (if available).
-- Defines a loss function that calculates the crossentropy between our prediction and the ground truth.
-- Sets the Adam optimiser to train the model with learning rate args.lr.
-- Runs the training loop. For each step (or epoch), it executes the following:
-    - Calls Flux.train! function to execute one training step.
-    - If any of the parameters of our model is NaN, then the training process is terminated.
-    - Calculates the model accuracy.
-    - If the model accuracy is >= 0.999, then early-exiting is executed.
-    - If the actual accuracy is the best so far, then the model is saved to mnist_conv.bson. Also, the new best accuracy and the current epoch is saved.
-    - If there has not been any improvement for the last 5 epochs, then the learning rate is dropped and the process waits a little longer for the accuracy to improve.
-    - If the last improvement was more than 10 epochs ago, then the process is terminated.
+- The .npy format stores matrices with the format HWN (height, width, number), where number is large (e.g, 10,000). 
 """
 
-# ╔═╡ c8182a16-eee3-4287-8b73-5680448bb282
-function train(acc_target = 0.999)   
-   args = TrainArgs()
- 
-   @info("Loading data set")
-   train_set, test_set = get_processed_data(args)
- 
-   # Define our model.  We will use a simple convolutional architecture with
-   # three iterations of Conv -> ReLU -> MaxPool, followed by a final Dense layer.
-   @info("Building model...")
-   model = build_model(args)
- 
-   # Load model and datasets onto GPU, if enabled
-   #train_set = gpu.(train_set)
-   #test_set = gpu.(test_set)
-   #model = gpu(model)
-  
-   # Make sure our model is nicely precompiled before starting our training loop
-   model(train_set[1][1])
- 
-   # `loss()` calculates the crossentropy loss between our prediction `y_hat`
-   # (calculated from `model(x)`) and the ground truth `y`.  We augment the data
-   # a bit, adding gaussian random noise to our image to make it more robust.
-   function loss(x, y)   
-       x̂ = augment(x)
-       ŷ = model(x̂)
-       return logitcrossentropy(ŷ, y)
-   end
-  
-   # Train our model with the given training set using the Adam optimiser and
-   # printing out performance against the test set as we go.
-   opt = Adam(args.lr)
-  
-   @info("Beginning training loop...")
-   best_acc = 0.0
-   last_improvement = 0
-   for epoch_idx in 1:args.epochs
-       # Train for a single epoch
-       Flux.train!(loss, params(model), train_set, opt)
-      
-       # Terminate on NaN
-       if anynan(Flux.params(model))
-           @error "NaN params"
-           break
-       end
-  
-       # Calculate accuracy:
-       acc = accuracy(test_set..., model)
-      
-       @info(@sprintf("[%d]: Test accuracy: %.4f", epoch_idx, acc))
-       # If our accuracy is good enough, quit out.
-       if acc >= acc_target
-           @info(" -> Early-exiting: We reached our target accuracy of $(acc_target)")
-           break
-       end
-  
-       # If this is the best accuracy we've seen so far, save the model out
-       if acc >= best_acc
-           @info(" -> New best accuracy! Saving model out to mnist_conv.bson")
-           BSON.@save joinpath(args.savepath, "mnist_conv.bson") weights =cpu.(params(model)) epoch_idx acc
-           best_acc = acc
-           last_improvement = epoch_idx
-       end
-  
-       # If we haven't seen improvement in 5 epochs, drop our learning rate:
-       if epoch_idx - last_improvement >= 5 && opt.eta > 1e-6
-           opt.eta /= 10.0
-           @warn(" -> Haven't improved in a while, dropping learning rate to $(opt.eta)!")
- 
-           # After dropping learning rate, give it a few epochs to improve
-           last_improvement = epoch_idx
-       end
-  
-       if epoch_idx - last_improvement >= 10
-           @warn(" -> We're calling this converged.")
-           break
-       end
-   end
+# ╔═╡ 9690fbf4-2c6c-4b85-a2c3-68d414b49037
+"""
+Load a .npy file with index = indx and path=ipath. Return an image in format WHN, where N is specified by nsize. 
+if norm=true normalizes to a Gray scale (0 to 1)
+"""
+function load_npy(ipath::String, indx::Integer; nsize=100)
+	fnames = glob("*.npy",ipath)
+	# permutedims changes WH to HW
+	imgs = permutedims(load(fnames[indx]), (3,2,1))
+
+	# take the min between the size of the npy image and nsize
+	dim = min(size(imgs)[3], nsize)
+	# This is an image set with the format [w,h,c,n] => [8,8,1,nsize]
+	imgx = zeros(Float32, size(imgs)[1:end-1]...,1,dim) 
+	for i in 1:dim
+		imgx[:,:,1,i] = Float32.(imgs[:,:,i]/maximum(imgs[:,:,i]))
+	end
+	
+	return imgx
 end
+
+# ╔═╡ cfab5b64-0c33-4ca7-a4e6-df38bc3bc605
+min(3,5)
+
+# ╔═╡ ab0ee0e4-8384-49ba-a1b9-b466f2dd0d1f
+imtx1 = load_npy(ipath, 1;  nsize=100)
+
+# ╔═╡ 836e079b-ac53-40f9-9845-7898d27cec41
+typeof(imtx1)
+
+# ╔═╡ 1cfc685d-db36-4263-82b9-2f29a5305890
+begin
+	im1 = Gray.(imtx1[:,:,1,1])
+	im2 = Gray.(imtx1[:,:,1,2])
+	im3 = Gray.(imtx1[:,:,1,3])
+	im4 = Gray.(imtx1[:,:,1,4])
+	mosaicview(im1, im2, im3, im4; nrow = 1)
+end
+
+# ╔═╡ 702082d0-dbc4-4c8d-9d9e-fe9b10aac0ee
+#=╠═╡
+layer = Conv((1, 1), 1=>16, pad=(1,1), relu)
+  ╠═╡ =#
+
+# ╔═╡ 0b4d61ef-5bcf-4b57-a15a-7ae305bd2e89
+#layer = Conv((5,5), 3 => 7, relu; bias = false)
+
+# ╔═╡ 4f953dca-8953-4b5d-b4c6-6a00d771a264
+"""
+Load label data. Each label data file corresponds to an .npy file, and provide tha labels (x,y,z) corresponding to each picture. 
+"""
+function load_lbl(lpath::String, indx::Integer)
+	fnames = glob("*.csv",lpath)
+	DataFrame(CSV.File(fnames[indx]))
+end
+
+# ╔═╡ 5346d463-945a-4899-b3c2-96a6ff840e0f
+lbltx1 = load_lbl(lpath,1)
+
+# ╔═╡ d3d7bbe8-c748-40a1-a393-5db25e566c07
+size(lbltx1)
+
+# ╔═╡ 7a56532a-3c27-455d-aef5-072c3ca4a57a
+"""
+Load a traing of .npy files in ipath. Each element of the train is a vector of 10,000 images (8 x 8)
+"""
+function load_images_npy(ipath::String; train=1:2, norm=true)
+	fnames = glob("*.npy",ipath)
+	imgtrain =[]
+	for it in train
+		imgs = permutedims(load(fnames[it]), (3,2,1)) 
+		imgx = zeros(Float32, size(imgs)...) 
+		if norm
+			for i in 1:size(imgs)[3]
+				imgx[:,:,i] = Float32.(imgs[:,:,i]/maximum(imgs[:,:,i]))
+			end
+		end
+		push!(imgtrain, imgx)
+	end
+	imgtrain
+end
+
+# ╔═╡ d4bc63f9-600a-412a-b693-83df14cc465c
+imtrain = load_images_npy(ipath; train=1:2, norm=true)
+
+# ╔═╡ cd7c72d0-b603-4e1f-945d-0a7f3240ed34
+imt1 = imtrain[1];
 
 # ╔═╡ 5ec5f58f-f627-4d36-90c3-f516e40e28b0
 @bind run_model CheckBox(default=false)
-
-# ╔═╡ 9b6b1884-16b8-4aec-afc7-5f4c22226d71
-if run_model
-	train(0.99)
-end
-
-# ╔═╡ d18f563e-2132-4165-a47e-4bd571fb3d3d
-md"""
-## Testing
-"""
-
-# ╔═╡ b9851972-2119-462f-9110-33e22b61550c
-md"""- Loading the test data"""
-
-# ╔═╡ 2c2868a9-c2d4-4dcb-b4da-5e32685e0af4
-_,test_set = get_processed_data(args)
-
-# ╔═╡ 7eb4d4af-02c2-48aa-b7f2-1de9d10b5912
-md"- Re-constructing the model with random initial weights"
-
-# ╔═╡ 3c8f1bf4-a394-4605-9ae3-23780e656d59
-md"""- Calculate accuracy:"""
-
-# ╔═╡ 99ba7810-e3b4-4c55-86cc-14c3ac12191f
-model = build_model(args)
-
-# ╔═╡ 64f39ef6-251b-41ad-ad3c-3af92883f11d
-md"""
-- Te model is not trained, accuracy must be very low.
-"""
-
-# ╔═╡ 2615f316-9bd1-4c04-ac19-4ce2a34b6774
- acc = accuracy(test_set..., model)
-
-# ╔═╡ d45777fb-0d4a-49e3-b10c-860a9087a8e4
-epoch_idx = 5
-
-# ╔═╡ 5e72461f-310d-4245-9b8f-75251205917a
-md"- Loading parameters onto the model"
-
-# ╔═╡ d40d5576-0bf8-4340-acc5-f636ba48e3fc
-BSON.@load joinpath(args.savepath, "mnist_conv.bson") weights
-
-# ╔═╡ b16ac5af-1dfe-4f87-9246-1210132becd2
-md"""
-- Loading parameters onto the model
-"""
-
-# ╔═╡ 203f61ef-b922-4813-9317-669a0ff12b77
-Flux.loadparams!(model, weights)
-
-# ╔═╡ f90467eb-2c51-4526-8053-6eb1b9d65967
-@show accuracy(test_set...,model)
-
-# ╔═╡ 9410280f-8d19-4ce3-9691-29eba293b28f
-md"""
-## Inspect the data
-"""
-
-# ╔═╡ f6eeda31-2881-4382-921c-6ee329b9be61
-md" choose image (image number) $(@bind in NumberField(0:60000; default=1))"
-
-# ╔═╡ 19c262c0-e8ec-4459-a695-98959db29b07
-begin
-	xtd = test_set[1];
-	ytd = test_set[2];
-	reshape(xtd[:,:,:,in], 28, 28) .|> Gray |> transpose
-end
-
-# ╔═╡ 9d606952-0c1a-4f7d-828f-7d3ebd6a96ae
-md"""
-
-NN predicts => $(Flux.onecold(ytd, 0:9)[in])
-"""
-
-# ╔═╡ b5168d99-bc57-4846-9d6e-19d9a302e5c8
-md"""
-## Example matrices
-"""
-
-# ╔═╡ 2a1e9014-e385-4d04-865e-d0988e7ccb9b
-begin
-	inm1 = zeros(5,5)
-	inm1[1,1] = 1
-	inm1[1,2] = 1
-	inm1[1,3] = 1
-	inm1[1,4] = 2
-	inm1[1,5] = 1
-	inm1[2,1] = 2
-	inm1[2,2] = 2
-	inm1[2,3] = 1
-	inm1[2,4] = 0
-	inm1[2,5] = 1
-	inm1[3,1] = 0
-	inm1[3,2] = 2
-	inm1[3,3] = 0
-	inm1[3,4] = 1
-	inm1[3,5] = 1
-	inm1[4,1] = 1
-	inm1[4,2] = 2
-	inm1[4,3] = 1
-	inm1[4,4] = 0
-	inm1[4,5] = 1
-	inm1[5,1] = 2
-	inm1[5,2] = 2
-	inm1[5,3] = 1
-	inm1[5,4] = 0
-	inm1[5,5] = 2
-	inm2 = zeros(5,5)
-	inm2[1,1] = 0
-	inm2[1,2] = 1
-	inm2[1,3] = 0
-	inm2[1,4] = 1
-	inm2[1,5] = 2
-	inm2[2,1] = 1
-	inm2[2,2] = 2
-	inm2[2,3] = 0
-	inm2[2,4] = 0
-	inm2[2,5] = 1
-	inm2[3,1] = 2
-	inm2[3,2] = 0
-	inm2[3,3] = 0
-	inm2[3,4] = 2
-	inm2[3,5] = 1
-	inm2[4,1] = 0
-	inm2[4,2] = 0
-	inm2[4,3] = 0
-	inm2[4,4] = 2
-	inm2[4,5] = 1
-	inm2[5,1] = 1
-	inm2[5,2] = 1
-	inm2[5,3] = 0
-	inm2[5,4] = 1
-	inm2[5,5] = 2
-	inm3 = zeros(5,5)
-	inm3[1,1] = 1
-	inm3[1,2] = 1
-	inm3[1,3] = 1
-	inm3[1,4] = 1
-	inm3[1,5] = 1
-	inm3[2,1] = 0
-	inm3[2,2] = 2
-	inm3[2,3] = 2
-	inm3[2,4] = 0
-	inm3[2,5] = 0
-	inm3[3,1] = 0
-	inm3[3,2] = 2
-	inm3[3,3] = 2
-	inm3[3,4] = 1
-	inm3[3,5] = 1
-	inm3[4,1] = 0
-	inm3[4,2] = 0
-	inm3[4,3] = 0
-	inm3[4,4] = 0
-	inm3[4,5] = 0
-	inm3[5,1] = 2
-	inm3[5,2] = 2
-	inm3[5,3] = 0
-	inm3[5,4] = 2
-	inm3[5,5] = 1
-	flt1 = zeros(3,3)
-	flt1[1,1] = 0
-	flt1[1,2] = -1
-	flt1[1,3] = 0
-	flt1[2,1] = 1
-	flt1[2,2] = -1
-	flt1[2,3] = 1
-	flt1[3,1] = 0
-	flt1[3,2] = 0
-	flt1[3,3] = -1
-	flt2 = zeros(3,3)
-	flt2[1,1] = -1
-	flt2[1,2] = -1
-	flt2[1,3] = 0
-	flt2[2,1] = 0
-	flt2[2,2] = -1
-	flt2[2,3] = 0
-	flt2[3,1] = -1
-	flt2[3,2] = -1
-	flt2[3,3] = -1
-	flt3 = zeros(3,3)
-	flt3[1,1] = -1
-	flt3[1,2] = -1
-	flt3[1,3] = 1
-	flt3[2,1] = 1
-	flt3[2,2] = 0
-	flt3[2,3] = 0
-	flt3[3,1] = 0
-	flt3[3,2] = 0
-	flt3[3,3] = -1
-	flt = zeros(3,3,3)
-	flt[:,:,1] = flt1
-	flt[:,:,2] = flt2
-	flt[:,:,3] = flt3
-end
-
-# ╔═╡ 517ca5ca-055f-440a-b04e-0beb96f0f9b5
-begin
-	inm = zeros(5,5,3)
-	inm[:,:,1] = inm1
-	inm[:,:,2] = inm2
-	inm[:,:,3] = inm3
-	inm
-end
-
-# ╔═╡ ac536c21-7f15-454a-b43d-5d9683f00cde
-begin
-	inmb = zeros(Float32, size(inm)...,1) #format WHNB
-	inmb[:,:,:,1] = inm
-end
-
-# ╔═╡ 0418962d-4221-4dc5-93a0-99c9f2955351
-layr(inmb)
-
-# ╔═╡ 8edac953-c850-4c43-adbf-bb4b03e9389d
-layr(inmb) |> size
-
-# ╔═╡ 25cacef8-8a53-4ee2-be7f-5b8b5901efd8
-begin
-	
-	flt
-end
-
-# ╔═╡ 898901a9-5cff-40e7-ac59-c8752eb08e5c
-xcs = xconv(inm, flt)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2959,68 +2403,23 @@ version = "1.4.1+1"
 # ╔═╡ Cell order:
 # ╠═9e74ec22-8e91-11ee-117a-abdcf9e944a1
 # ╠═fc8696df-9ec7-444c-8f85-d06e3c2089fd
-# ╠═04efc24e-fc05-43e5-aee5-e55ef947f3a9
-# ╠═2b1be43b-4265-43c7-9a34-179562e8093f
-# ╟─4f5cb10d-435b-429b-86f5-fe0fce156666
-# ╟─c0fba35e-3bb6-479d-a49d-3b8ed8645334
-# ╟─6cb915d9-0777-49c9-a2ad-22d3ce759c21
-# ╟─517791f5-9ece-4d0e-9f31-fb3f904292e0
-# ╠═94986e46-ab91-4dce-a2d7-8cadd3c6f1c6
-# ╠═a682566d-1095-4e06-8d28-871ede647ad2
-# ╟─b9a318cc-de07-4307-9ac9-567936fb8e6e
-# ╟─c513359b-97ab-4c81-ae59-9e232d8dcd2e
-# ╟─81d8337a-3f82-4df0-b2d6-2e78c2b10026
-# ╠═7be6c2b0-5411-4ca5-9a69-6812b7e42f49
-# ╠═517ca5ca-055f-440a-b04e-0beb96f0f9b5
-# ╠═25cacef8-8a53-4ee2-be7f-5b8b5901efd8
-# ╠═b5dbb8f4-042e-4e2c-a046-12e8b564539d
-# ╠═08b1646a-c1e8-476c-9a9e-31185b46b9b9
-# ╠═898901a9-5cff-40e7-ac59-c8752eb08e5c
-# ╠═844f41da-ba98-4bbf-bd87-9fba538ed088
-# ╠═1ed7b768-d432-4219-8ff8-f269655a41cb
-# ╠═ac536c21-7f15-454a-b43d-5d9683f00cde
-# ╠═003c6e76-cf12-4895-8e90-701c277883af
-# ╠═0418962d-4221-4dc5-93a0-99c9f2955351
-# ╠═8edac953-c850-4c43-adbf-bb4b03e9389d
-# ╠═0e87fba4-799a-4c8d-9d00-67924ff5f437
-# ╠═e8a48260-74a5-4eab-a02d-8e1554abec20
-# ╠═2cc5bf52-3612-49c4-8e32-f9ebbb5d3867
-# ╟─1d5c2ea2-a4d7-4668-9e0e-9fc0a8862079
-# ╠═e654a457-4fde-4e8a-9a10-72181afe5d88
-# ╟─4ac3a1b4-816e-47d0-a7a0-9e02453b1f53
-# ╠═3c179f7e-d256-4923-9b28-b708952b5cb7
-# ╠═8813602c-9605-48c0-b44d-384d9a2c711c
-# ╠═d84854ef-7c3c-4ca2-8a79-9f8eb4411fcc
-# ╠═599a863c-0fd8-4677-af0e-6a49e8dd5636
-# ╟─62e3fff7-ffde-4a9a-aefc-d18152390932
-# ╠═947aff60-5ca6-4d73-81b3-61b0582c365b
-# ╠═c6482309-b228-4ad4-9db7-e4bc61ec0bfb
-# ╠═5ed5814e-a414-4fff-bae7-e9541edcc4b6
-# ╟─5de74434-b1cd-4715-897b-4026d06a9a63
-# ╠═510cb338-1e0c-4fdd-bc37-581ba68430f9
-# ╟─cc5a65aa-2945-43c0-8b2b-b105335773ef
-# ╠═c8182a16-eee3-4287-8b73-5680448bb282
+# ╠═f9fc6d3a-f69a-4e2b-8135-b5339145d567
+# ╠═f358d94a-1530-4544-bbb8-6c3a3e3ff0fd
+# ╠═492a84e6-e7bf-4a59-a791-e9c8a02819f5
+# ╠═c0da60f2-b14d-43af-8cb5-ddb60d7d942b
+# ╠═9690fbf4-2c6c-4b85-a2c3-68d414b49037
+# ╠═cfab5b64-0c33-4ca7-a4e6-df38bc3bc605
+# ╠═ab0ee0e4-8384-49ba-a1b9-b466f2dd0d1f
+# ╠═836e079b-ac53-40f9-9845-7898d27cec41
+# ╠═1cfc685d-db36-4263-82b9-2f29a5305890
+# ╠═702082d0-dbc4-4c8d-9d9e-fe9b10aac0ee
+# ╠═0b4d61ef-5bcf-4b57-a15a-7ae305bd2e89
+# ╠═4f953dca-8953-4b5d-b4c6-6a00d771a264
+# ╠═5346d463-945a-4899-b3c2-96a6ff840e0f
+# ╠═d3d7bbe8-c748-40a1-a393-5db25e566c07
+# ╠═7a56532a-3c27-455d-aef5-072c3ca4a57a
+# ╠═d4bc63f9-600a-412a-b693-83df14cc465c
+# ╠═cd7c72d0-b603-4e1f-945d-0a7f3240ed34
 # ╠═5ec5f58f-f627-4d36-90c3-f516e40e28b0
-# ╠═9b6b1884-16b8-4aec-afc7-5f4c22226d71
-# ╠═d18f563e-2132-4165-a47e-4bd571fb3d3d
-# ╠═b9851972-2119-462f-9110-33e22b61550c
-# ╠═2c2868a9-c2d4-4dcb-b4da-5e32685e0af4
-# ╠═7eb4d4af-02c2-48aa-b7f2-1de9d10b5912
-# ╠═3c8f1bf4-a394-4605-9ae3-23780e656d59
-# ╠═99ba7810-e3b4-4c55-86cc-14c3ac12191f
-# ╠═64f39ef6-251b-41ad-ad3c-3af92883f11d
-# ╠═2615f316-9bd1-4c04-ac19-4ce2a34b6774
-# ╠═d45777fb-0d4a-49e3-b10c-860a9087a8e4
-# ╠═5e72461f-310d-4245-9b8f-75251205917a
-# ╠═d40d5576-0bf8-4340-acc5-f636ba48e3fc
-# ╠═b16ac5af-1dfe-4f87-9246-1210132becd2
-# ╠═203f61ef-b922-4813-9317-669a0ff12b77
-# ╠═f90467eb-2c51-4526-8053-6eb1b9d65967
-# ╠═9410280f-8d19-4ce3-9691-29eba293b28f
-# ╠═f6eeda31-2881-4382-921c-6ee329b9be61
-# ╠═19c262c0-e8ec-4459-a695-98959db29b07
-# ╠═9d606952-0c1a-4f7d-828f-7d3ebd6a96ae
-# ╠═b5168d99-bc57-4846-9d6e-19d9a302e5c8
-# ╠═2a1e9014-e385-4d04-865e-d0988e7ccb9b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
